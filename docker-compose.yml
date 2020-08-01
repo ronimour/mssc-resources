@@ -1,7 +1,87 @@
 version: '3.8'
+
+volumes:
+  prometheus:
+  grafana:
+  mysql_data:
+    driver: local
+
+networks:
+  monitoring:
+
+
 services:
+  grafana:
+    image: grafana/grafana:5.4.3
+    container_name: grafana
+    ports:
+      - 3000:3000
+    # user: "0"
+    volumes:
+      - grafana:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
+    networks:
+      monitoring:
+        aliases:
+          - prometheus
+  prometheus:
+    image: prom/prometheus:v2.6.1
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus:/prometheus
+    networks:
+      monitoring:
+        aliases:
+          - prometheus
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.7.0
+    container_name: elasticsearch
+    ports:
+      - 9200:9200
+    environment:
+      discovery.type: single-node
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.7.0
+    container_name: kibana
+    ports:
+      - 5601:5601
+    restart: on-failure
+    depends_on:
+      - elasticsearch      
+  mysql:
+    image: mysql:5.7
+    container_name: mysql
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/mysql/setup.sql:/docker-entrypoint-initdb.d/
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_PASSWORD: password
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak
+    environment:
+      DB_VENDOR: MYSQL
+      DB_ADDR: mysql
+      DB_DATABASE: keycloak
+      DB_USER: keycloak
+      DB_PASSWORD: password
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: pass
+      # Uncomment the line below if you want to specify JDBC parameters. The parameter below is just an example, and it shouldn't be used in production without knowledge. It is highly recommended that you read the MySQL JDBC driver documentation in order to use it.
+      #JDBC_PARAMS: "connectTimeout=30000"
+    ports:
+      - 8080:8080
+    depends_on:
+      - mysql
   jms:
     image: vromero/activemq-artemis
+    container_name: jms
     ports:
       - 8161:8161
       - 61616:61616
@@ -9,6 +89,15 @@ services:
     image: openzipkin/zipkin
     ports:
       - 9411:9411
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.7.0
+    container_name: filebeat
+    volumes:
+      - ./filebeat/filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    user: "root"
+    restart: on-failure      
   eureka:
     image: sfgbeerworks/sfg-brewery-eureka
     ports:
